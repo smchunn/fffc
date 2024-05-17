@@ -174,6 +174,7 @@ fn init_fffc_from_csv(fffc: &mut FFFC, filename: &str) -> Result<(), Box<dyn Err
 fn fffc_to_csv(fffc: &FFFC, path: &str) -> Result<(), Box<dyn Error>> {
     let mut wtr = WriterBuilder::new().from_path(format!("{path}/fffc_groups.csv"))?;
     for (part_number, id) in &fffc.lookup {
+        println!("{}, {}", part_number, id);
         wtr.serialize(FFFCRecord { part_number, id })?;
     }
     wtr.flush()?;

@@ -25,9 +25,6 @@ impl FFFC {
     }
 
     pub fn add_bw(&mut self, pn1: &str, pn2: &str) {
-        if ["G1L124-25", "AJ4L34-25"].contains(&pn1) {
-            println!("breakpoint");
-        }
         if let Some(&id1) = self.lookup.get(pn1) {
             self.add_bw_by_id(id1, pn2);
         } else if let Some(&id2) = self.lookup.get(pn2) {
@@ -35,9 +32,6 @@ impl FFFC {
         } else {
             let id = self.add_part(pn1);
             self.add_bw_by_id(id, pn2);
-            if ["G1L124-25", "AJ4L34-25"].contains(&pn1) {
-                dbg!(self.lookup.get(pn1));
-            }
         }
     }
 
@@ -58,10 +52,6 @@ impl FFFC {
         } else { // pn not in lookup -> add to groups, add to lookup
             self.groups.entry(id).or_default().push(pn.to_string());
             self.lookup.insert(pn.to_string(), id);
-        }
-        if ["G1L124-25", "AJ4L34-25"].contains(&pn) {
-            dbg!(self.groups.get(&id));
-            dbg!(self.lookup.get(pn));
         }
     }
 
@@ -209,11 +199,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("Usage: program <input_csv> <output_csv>");
         return Ok(());
     }
+    println!("{} {} {}", args[0], args[1], args[2]);
     init_fffc_from_csv(&mut fffc, &args[1])?;
     if let Err(_e) = std::fs::create_dir_all(&args[2]) {
         return Ok(());
     }
     fffc_to_csv(&fffc, &args[2])?;
+    println!("Done");
     Ok(())
 }
 

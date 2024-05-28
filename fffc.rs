@@ -2,7 +2,6 @@ use csv::{ReaderBuilder, WriterBuilder};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::collections::LinkedList;
 use std::collections::VecDeque;
 use std::error::Error;
 use uuid::Uuid;
@@ -91,6 +90,7 @@ impl FFFC {
     pub fn add_ow(&mut self, pn_from: &str, pn_to: &str) {
         if let Some(&id_from) = self.lookup.get(pn_from) {
             if let Some(&id_to) = self.lookup.get(pn_to) {
+                // get all ids that id_to points to
                 if let Some(resolved_links) = self.get_links(id_to) {
                     if resolved_links.contains(&id_from) {
                         self.add_bw(pn_from, pn_to);
@@ -101,6 +101,7 @@ impl FFFC {
                                 }
                                 self.groups.entry(id_from).or_default().extend(tmp_list);
                                 self.mains.remove(&id);
+                                self.set_main(id_from, pn_from);
                             }
                         }
                     } else {
@@ -144,13 +145,14 @@ impl FFFC {
         id
     }
 
+    // gets all links that an id point to 
     pub fn get_links(&mut self, id: Uuid) -> Option<HashSet<Uuid>> {
         let mut link_set: HashSet<Uuid> = HashSet::new();
         let mut bfs_queue: VecDeque<Uuid> = VecDeque::new();
         bfs_queue.push_back(id);
 
         while let Some(cur_id) = bfs_queue.pop_front() {
-            if link_set.contains(&cur_id) {
+            if !link_set.contains(&cur_id) {
                 if let Some(to_ids) = self.links.get(&cur_id) {
                     for tmp_id in to_ids {
                         link_set.insert(*tmp_id);
@@ -163,9 +165,14 @@ impl FFFC {
     }
 
     fn extend_from_csv(&mut self, filename: &str) -> Result<(), Box<dyn Error>> {
-        let mut rdr = ReaderBuilder::new().from_path(filename)?;
+        let mut rdr = ReaderBuilder::new().delimiter(b'|').from_path(filename)?;
         for result in rdr.deserialize() {
-            let record: CSVRecord = result.unwrap();
+            let record: CSVRecord = match result {
+                Ok(record) => record,
+                Err(e) => {
+                    return Err(Box::new(e));
+                },
+            };
             match record.relationship {
                 0 => _ = self.add_part(&record.main),
                 1 => self.add_ow(&record.main, &record.ic),
@@ -178,7 +185,7 @@ impl FFFC {
 
     pub fn deserialize(&mut self, path: &str) 
     -> Result<(), Box<dyn Error>> {
-        let mut rdr = ReaderBuilder::new().from_path(format!("{path}/fffc_groups.csv"))?;
+        let mut rdr = ReaderBuilder::new().delimiter(b'|').from_path(format!("{path}/fffc_groups.csv"))?;
         for result in rdr.deserialize() {
             let record: FFFCRecord = match result {
                 Ok(record) => record,
@@ -187,7 +194,7 @@ impl FFFC {
             self.lookup.entry(record.part_number.clone()).or_insert(record.id);
             self.groups.entry(record.id).or_insert_with(Vec::new).push(record.part_number);
         }
-        let mut rdr = ReaderBuilder::new().from_path(format!("{path}/fffc_mains.csv"))?;
+        let mut rdr = ReaderBuilder::new().delimiter(b'|').from_path(format!("{path}/fffc_mains.csv"))?;
         for result in rdr.deserialize() {
             let record: FFFCMain = match result {
                 Ok(record) => record,
@@ -195,7 +202,7 @@ impl FFFC {
             };
             self.mains.entry(record.id).or_insert(record.part_number);
         }
-        let mut rdr = ReaderBuilder::new().from_path(format!("{path}/fffc_links.csv"))?;
+        let mut rdr = ReaderBuilder::new().delimiter(b'|').from_path(format!("{path}/fffc_links.csv"))?;
         for result in rdr.deserialize() {
             let record: FFFCLink = match result {
                 Ok(record) => record,
@@ -208,17 +215,17 @@ impl FFFC {
     }
 
     fn serialize(&self, path: &str) -> Result<(), Box<dyn Error>> {
-        let mut wtr = WriterBuilder::new().from_path(format!("{path}/fffc_groups.csv"))?;
+        let mut wtr = WriterBuilder::new().delimiter(b'|').from_path(format!("{path}/fffc_groups.csv"))?;
         for (part_number, id) in &self.lookup {
             wtr.serialize(FFFCRecord { part_number:part_number.clone(), id:*id })?;
         }
         wtr.flush()?;
-        let mut wtr = WriterBuilder::new().from_path(format!("{path}/fffc_mains.csv"))?;
+        let mut wtr = WriterBuilder::new().delimiter(b'|').from_path(format!("{path}/fffc_mains.csv"))?;
         for (id, part_number) in &self.mains {
             wtr.serialize(FFFCMain { part_number:part_number.clone(), id:*id })?;
         }
         wtr.flush()?;
-        let mut wtr = WriterBuilder::new().from_path(format!("{path}/fffc_links.csv"))?;
+        let mut wtr = WriterBuilder::new().delimiter(b'|').from_path(format!("{path}/fffc_links.csv"))?;
         for (id_from, ids_to) in &self.links {
             for id_to in ids_to {
                 wtr.serialize(FFFCLink { id_from:*id_from, id_to:*id_to })?;

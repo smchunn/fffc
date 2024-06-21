@@ -191,8 +191,8 @@ impl FFFC {
                 Ok(record) => record,
                 Err(e) => return Err(Box::new(e)),
             };
-            self.lookup.entry(record.part_number.clone()).or_insert(record.id);
-            self.groups.entry(record.id).or_insert_with(Vec::new).push(record.part_number);
+            self.lookup.entry(record.part_number.clone()).or_insert(record.group_id);
+            self.groups.entry(record.group_id).or_insert_with(Vec::new).push(record.part_number);
         }
         let mut rdr = ReaderBuilder::new().delimiter(b'|').from_path(format!("{path}/fffc_mains.csv"))?;
         for result in rdr.deserialize() {
@@ -200,7 +200,7 @@ impl FFFC {
                 Ok(record) => record,
                 Err(e) => return Err(Box::new(e)),
             };
-            self.mains.entry(record.id).or_insert(record.part_number);
+            self.mains.entry(record.group_id).or_insert(record.part_number);
         }
         let mut rdr = ReaderBuilder::new().delimiter(b'|').from_path(format!("{path}/fffc_links.csv"))?;
         for result in rdr.deserialize() {
@@ -217,12 +217,12 @@ impl FFFC {
     fn serialize(&self, path: &str) -> Result<(), Box<dyn Error>> {
         let mut wtr = WriterBuilder::new().delimiter(b'|').from_path(format!("{path}/fffc_groups.csv"))?;
         for (part_number, id) in &self.lookup {
-            wtr.serialize(FFFCRecord { part_number:part_number.clone(), id:*id })?;
+            wtr.serialize(FFFCRecord { part_number:part_number.clone(), group_id:*id })?;
         }
         wtr.flush()?;
         let mut wtr = WriterBuilder::new().delimiter(b'|').from_path(format!("{path}/fffc_mains.csv"))?;
         for (id, part_number) in &self.mains {
-            wtr.serialize(FFFCMain { part_number:part_number.clone(), id:*id })?;
+            wtr.serialize(FFFCMain { part_number:part_number.clone(), group_id:*id })?;
         }
         wtr.flush()?;
         let mut wtr = WriterBuilder::new().delimiter(b'|').from_path(format!("{path}/fffc_links.csv"))?;
@@ -249,13 +249,13 @@ struct CSVRecord {
 #[derive(Debug, Serialize, Deserialize)]
 struct FFFCRecord {
     part_number: String,
-    id: Uuid,
+    group_id: Uuid,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct FFFCMain {
     part_number: String,
-    id: Uuid,
+    group_id: Uuid,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

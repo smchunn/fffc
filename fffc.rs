@@ -88,12 +88,13 @@ impl FFFC {
     }
 
     pub fn add_ow(&mut self, pn_from: &str, pn_to: &str) {
-        if let Some(&id_from) = self.lookup.get(pn_from) {
-            if let Some(&id_to) = self.lookup.get(pn_to) {
+        if let Some(&id_from) = self.lookup.get(pn_from) { // pn_from in fffc
+            if let Some(&id_to) = self.lookup.get(pn_to) { // both in fffc
                 // get all ids that id_to points to
                 if let Some(resolved_links) = self.get_links(id_to) {
-                    if resolved_links.contains(&id_from) {
-                        self.add_bw(pn_from, pn_to);
+                    if resolved_links.contains(&id_from) { // if id_to points 
+                        // back to id_from i.e. circular reference
+                        self.add_bw(pn_from, pn_to); // convert to both-way
                         for id in resolved_links {
                             if let Some(tmp_list) = self.groups.remove(&id) {
                                 for tmp_pn in &tmp_list {
@@ -104,23 +105,27 @@ impl FFFC {
                                 self.set_main(id_from, pn_from);
                             }
                         }
-                    } else {
+                    } else { // add link
                         self.links.entry(id_from).or_insert_with(Vec::new).push(id_to);
                         self.links_reverse.entry(id_to).or_insert_with(Vec::new).push(id_from);
                     }
                 }
-            } else {
+            } else { // add pn_to 
                 let id_to = self.add_part(pn_to);
                 self.links.entry(id_from).or_insert_with(Vec::new).push(id_to);
                 self.links_reverse.entry(id_to).or_insert_with(Vec::new).push(id_from);
             }
+        // pn_to in fffc, add pn_from
         } else if let Some(&id_to) = self.lookup.get(pn_to) {
             let id_from = self.add_part(pn_from);
             self.links.entry(id_from).or_insert_with(Vec::new).push(id_to);
+            self.links_reverse.entry(id_to).or_insert_with(Vec::new).push(id_from);
+        // neither in fffc, add both
         } else {
             let id_from = self.add_part(pn_from);
             let id_to = self.add_part(pn_to);
             self.links.entry(id_from).or_insert_with(Vec::new).push(id_to);
+            self.links_reverse.entry(id_to).or_insert_with(Vec::new).push(id_from);
         }
     }
 
@@ -152,11 +157,10 @@ impl FFFC {
         bfs_queue.push_back(id);
 
         while let Some(cur_id) = bfs_queue.pop_front() {
-            if !link_set.contains(&cur_id) {
-                if let Some(to_ids) = self.links.get(&cur_id) {
-                    for tmp_id in to_ids {
-                        link_set.insert(*tmp_id);
-                        bfs_queue.push_back(*tmp_id);
+            if let Some(to_ids) = self.links.get(&cur_id) {
+                for &tmp_id in to_ids {
+                    if link_set.insert(tmp_id) { // Only add if it wasn't already in the set
+                        bfs_queue.push_back(tmp_id);
                     }
                 }
             }

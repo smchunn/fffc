@@ -6,6 +6,14 @@ use std::collections::VecDeque;
 use std::error::Error;
 use uuid::Uuid;
 
+macro_rules! debug_println {
+    ($($arg:tt)*) => (if ::std::cfg!(debug_assertions) { ::std::println!($($arg)*); })
+}
+
+macro_rules! debug_mode {
+    () => (::std::cfg!(debug_assertions))
+}
+
 #[derive(Debug)]
 pub struct FFFC {
     // lookup: HashMap to lookup a group id for a given part_number
@@ -68,13 +76,16 @@ impl FFFC {
                     self.mains.remove(&id_old);
                 }
                 // For one way links: update old_id in links & links_reverse
-                if let Some(tmp_ow_from_list) = self.links_reverse.remove(&id_old) {
+                if let Some(mut tmp_ow_from_list) = self.links_reverse.remove(&id_old) {
                     for tmp_ow_from_id in &tmp_ow_from_list { 
                         if let Some(tmp_ow_to_list) = self.links.get_mut(tmp_ow_from_id) {
                             tmp_ow_to_list.remove(&id_old);
-                            tmp_ow_to_list.insert(id);
+                            if tmp_ow_from_id != &id {
+                                tmp_ow_to_list.insert(id);
+                            }
                         }
                     }
+                    tmp_ow_from_list.remove(&id);
                     self.links_reverse.entry(id).or_default().extend(tmp_ow_from_list);
                 }
             }
@@ -87,48 +98,49 @@ impl FFFC {
     pub fn add_ow(&mut self, pn_from: &str, pn_to: &str) {
         if let Some(&id_from) = self.lookup.get(pn_from) { // pn_from in fffc
             if let Some(&id_to) = self.lookup.get(pn_to) { // both in fffc
-                // get all ids that id_to points to
-                // println!("circular links: {:?}",self.get_circular_links(id_to, id_from));
-                if let Some(circular_links) = self.get_circular_links(id_to, id_from) {
-                    // println!("circular links: {:?}", circular_links);
-                    // back to id_from i.e. circular reference
-                    // self.add_bw(pn_from, pn_to); // convert to both-way
-                    for id in &circular_links {
-                        if let Some(tmp_list) = self.groups.remove(&id) {
-                            for tmp_pn in &tmp_list {
-                                self.lookup.insert(tmp_pn.clone(), id_from);
-                            }
-                            self.groups.entry(id_from).or_default().extend(tmp_list);
-                            self.mains.remove(&id);
-                            // get ids that point to the old id and remove them
-                            if let Some(rev_links) = self.links_reverse.remove(&id) {
-                                for tmp_id_from in rev_links {
-                                    if tmp_id_from != id_from && !&circular_links.contains(&tmp_id_from) {
-                                        self.links_reverse.entry(id_from).or_default().insert(tmp_id_from);
-                                    }
-                                    self.links.entry(tmp_id_from).or_default().remove(&id);
-                                    if tmp_id_from != id_from {
-                                        self.links.entry(tmp_id_from).or_default().insert(id_from);
+                if &id_to != &id_from {
+                    // get all ids that id_to points to
+                    if let Some(circular_links) = self.get_circular_links(id_to, id_from) {
+                        debug_println!("circular links: {:?}\n", circular_links);
+                        for id in &circular_links {
+                            // for each pn in each group that makes up the 
+                            // circular links, change to 2 way
+                            if let Some(tmp_list) = self.groups.remove(&id) {
+                                for tmp_pn in &tmp_list {
+                                    self.lookup.insert(tmp_pn.clone(), id_from);
+                                }
+                                self.groups.entry(id_from).or_default().extend(tmp_list);
+                                self.mains.remove(&id);
+                                // get ids that point to the old id and remove them
+                                if let Some(rev_links) = self.links_reverse.remove(&id) {
+                                    for tmp_id_from in rev_links {
+                                        if tmp_id_from != id_from && !&circular_links.contains(&tmp_id_from) {
+                                            self.links_reverse.entry(id_from).or_default().insert(tmp_id_from);
+                                        }
+                                        self.links.entry(tmp_id_from).or_default().remove(&id);
+                                        if tmp_id_from != id_from {
+                                            self.links.entry(tmp_id_from).or_default().insert(id_from);
+                                        }
                                     }
                                 }
-                            }
-                            if let Some(links) = self.links.remove(&id) {
-                                for tmp_id_to in links {
-                                    if tmp_id_to != id_from && !&circular_links.contains(&tmp_id_to){
-                                        self.links.entry(id_from).or_default().insert(tmp_id_to);
-                                    }
-                                    self.links_reverse.entry(tmp_id_to).or_default().remove(&id);
-                                    if tmp_id_to != id_from {
-                                        self.links_reverse.entry(tmp_id_to).or_default().insert(id_from);
+                                if let Some(links) = self.links.remove(&id) {
+                                    for tmp_id_to in links {
+                                        if tmp_id_to != id_from && !&circular_links.contains(&tmp_id_to){
+                                            self.links.entry(id_from).or_default().insert(tmp_id_to);
+                                        }
+                                        self.links_reverse.entry(tmp_id_to).or_default().remove(&id);
+                                        if tmp_id_to != id_from {
+                                            self.links_reverse.entry(tmp_id_to).or_default().insert(id_from);
+                                        }
                                     }
                                 }
                             }
                         }
+                    } 
+                    else { // add link
+                        self.links.entry(id_from).or_insert_with(HashSet::new).insert(id_to);
+                        self.links_reverse.entry(id_to).or_insert_with(HashSet::new).insert(id_from);
                     }
-                } 
-                else { // add link
-                    self.links.entry(id_from).or_insert_with(HashSet::new).insert(id_to);
-                    self.links_reverse.entry(id_to).or_insert_with(HashSet::new).insert(id_from);
                 }
             } else { // add pn_to 
                 let id_to = self.add_part(pn_to);
@@ -173,34 +185,28 @@ impl FFFC {
     // gets all links that an id point to 
     pub fn get_circular_links(&mut self, id: Uuid, id_search: Uuid) -> Option<HashSet<Uuid>> {
         let mut visited: HashSet<Uuid> = HashSet::new();
-        let mut path: VecDeque<Uuid> = VecDeque::new();
-        let mut stack: VecDeque<Uuid> = VecDeque::new();
-        stack.push_back(id);
-        // println!("starting id: {:?}", id);
-        // println!("search id: {:?}", id_search);
-        // println!();
+        let mut return_set: HashSet<Uuid> = HashSet::new();
+        let mut stack: VecDeque<(Uuid, VecDeque<Uuid>)> = VecDeque::new();
+        stack.push_back((id, VecDeque::new()));
 
-        while let Some(cur_id) = stack.pop_back() {
-            // println!("cur_id: {:?}", cur_id);
-            // println!("stack: {:?}", stack);
-            // println!("visited: {:?}", visited);
-            path.push_back(cur_id);
-            // println!("path: {:?}", path);
+        while let Some((cur_id, mut cur_path)) = stack.pop_back() {
+            cur_path.push_back(cur_id);
+
             if let Some(to_ids) = self.links.get(&cur_id) {
-                // println!("to_ids: {:?}", to_ids);
                 for &tmp_id in to_ids {
                     if visited.insert(tmp_id) { // Only add if it wasn't already in the set
-                        stack.push_back(tmp_id);
+                        let  new_path = cur_path.clone();
+                        stack.push_back((tmp_id, new_path));
                     }
                     if tmp_id == id_search {
-                        return Some(path.into_iter().collect())
+                        return_set.extend(cur_path.iter().cloned());
                     }
                 }
             }
-            else {
-                path.pop_back();
-            }
-            // println!();
+        }
+
+        if return_set.len() > 0 {
+            return Some(return_set);
         }
         None
     }
@@ -214,28 +220,34 @@ impl FFFC {
                     return Err(Box::new(e));
                 },
             };
+            if debug_mode!() {
+                println!("-------------------------------------------------------");
+                println!("record: {:?}", record);
+                println!();
+            }
             match record.relationship {
                 0 => _ = self.add_part(&record.main),
                 1 => self.add_ow(&record.main, &record.ic),
                 2 => self.add_bw(&record.main, &record.ic),
                 _ => println!("Invalid relationship value: {}. Skipping row.", record.relationship),
             }
-            // println!();
-            // println!("groups:");
-            // for group in &self.groups {
-            //     println!("{:?}", group);
-            // }
-            // println!();
-            // println!("links:");
-            // for link in &self.links {
-            //     println!("{:?}", link);
-            // }
-            // println!();
-            // println!("links (r):");
-            // for link in &self.links_reverse {
-            //     println!("{:?}", link);
-            // }
-            // println!()
+            if debug_mode!() {
+                println!("groups:");
+                for group in &self.groups {
+                    println!("{:?}", group);
+                }
+                println!();
+                println!("links:");
+                for link in &self.links {
+                    println!("{:?}", link);
+                }
+                println!();
+                println!("links (r):");
+                for link in &self.links_reverse {
+                    println!("{:?}", link);
+                }
+                println!();
+            }
         }
         Ok(())
     }
@@ -338,11 +350,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             Ok(())
         },
         4 => {
-            if let Err(_e) = fffc.deserialize(&args[1]) {
-                println!("existing fffc not found");
+            if &args[3] != "-d" {
+                if let Err(_e) = fffc.deserialize(&args[2]) {
+                    println!("existing fffc not found");
+                }
             }
-            fffc.extend_from_csv(&args[2])?;
-            if let Err(_e) = std::fs::create_dir_all(&args[3]) {
+            fffc.extend_from_csv(&args[1])?;
+            if let Err(_e) = std::fs::create_dir_all(&args[2]) {
                 return Ok(());
             }
             fffc.serialize(&args[2])?;
@@ -351,7 +365,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         _ => {
             println!("Usage: program <input_csv> <output_path> ");
-            println!("Usage: program <input_path> <input_csv> <output_path> ");
             return Ok(());
         },
     }
